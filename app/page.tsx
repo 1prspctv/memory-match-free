@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { submitScoreWithQueue, getTopScores, TopScore } from '@/lib/leaderboard';
 import { useScoreSync } from '@/hooks/useScoreSync';
+import PerfectGameCongrats from '@/components/PerfectGameCongrats';
+import TopScorerCongrats from '@/components/TopScorerCongrats';
 
 const CARDS = [
   { id: 1, emoji: '🏔️' }, { id: 2, emoji: '🌴' }, { id: 3, emoji: '🌊' },
@@ -26,6 +28,10 @@ export default function MemoryMatchGame() {
   const [lastPlayedScore, setLastPlayedScore] = useState<number | null>(null);
   const [finalScore, setFinalScore] = useState<number>(0);
   const [currentGameScore, setCurrentGameScore] = useState<number>(0);
+  const [showPerfectCongrats, setShowPerfectCongrats] = useState(false);
+  const [showTopScorerCongrats, setShowTopScorerCongrats] = useState(false);
+  const [playerDailyRank, setPlayerDailyRank] = useState<number | null>(null);
+  const [playerAlltimeRank, setPlayerAlltimeRank] = useState<number | null>(null);
 
   useEffect(() => {
     loadLeaderboards();
@@ -137,6 +143,10 @@ export default function MemoryMatchGame() {
     setCurrentGameScore(1000000); // Initialize with max score (8 pairs * 125k)
     setFinalScore(0); // Reset final score
     setGameComplete(false); // Reset completion flag
+    setShowPerfectCongrats(false); // Reset congratulations screens
+    setShowTopScorerCongrats(false);
+    setPlayerDailyRank(null);
+    setPlayerAlltimeRank(null);
     setScreen('game');
   };
 
@@ -210,13 +220,52 @@ export default function MemoryMatchGame() {
         }
       }
 
-      // Reload leaderboards
+      // Reload leaderboards to get updated rankings
       await loadLeaderboards();
+
+      // Check if player achieved something special
+      checkForCongratulations(score);
 
     } catch (error) {
       console.error('Failed to save score:', error);
     } finally {
       setSubmittingScore(false);
+    }
+  };
+
+  const checkForCongratulations = async (score: number) => {
+    // Wait a bit for leaderboards to update
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Reload to get fresh data
+    const daily = await getTopScores('memory-free-daily', 10);
+    const alltime = await getTopScores('memory-free-alltime', 10);
+
+    // Find player's rank in both leaderboards
+    const dailyEntry = daily.find(
+      (entry) => entry.score === score && entry.player_name.toLowerCase() === playerName.toLowerCase()
+    );
+    const alltimeEntry = alltime.find(
+      (entry) => entry.score === score && entry.player_name.toLowerCase() === playerName.toLowerCase()
+    );
+
+    const dailyRank = dailyEntry?.rank || null;
+    const alltimeRank = alltimeEntry?.rank || null;
+
+    setPlayerDailyRank(dailyRank);
+    setPlayerAlltimeRank(alltimeRank);
+
+    // Check for perfect/excellent game (0-1 wrong attempts)
+    const wrongAttempts = gameState?.wrong || 0;
+    if (wrongAttempts <= 1) {
+      setShowPerfectCongrats(true);
+      return; // Show perfect congrats first
+    }
+
+    // Check for top scorer (top 3 in either leaderboard)
+    if ((dailyRank && dailyRank <= 3) || (alltimeRank && alltimeRank <= 3)) {
+      setShowTopScorerCongrats(true);
+      return;
     }
   };
 
@@ -299,12 +348,39 @@ export default function MemoryMatchGame() {
 
   const score = calcScore();
 
-  const VERSION = "1.9";
+  const VERSION = "2.0";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-900 via-teal-800 to-cyan-900 flex items-center justify-center p-4">
       <div className="max-w-2xl w-full">
-        
+
+        {/* Congratulations Screens */}
+        {showPerfectCongrats && (
+          <PerfectGameCongrats
+            playerName={playerName}
+            finalScore={finalScore}
+            wrongAttempts={gameState?.wrong || 0}
+            timeElapsed={calcScore().elapsed}
+            onContinue={() => {
+              setShowPerfectCongrats(false);
+              // Check if also top scorer
+              if ((playerDailyRank && playerDailyRank <= 3) || (playerAlltimeRank && playerAlltimeRank <= 3)) {
+                setShowTopScorerCongrats(true);
+              }
+            }}
+          />
+        )}
+
+        {showTopScorerCongrats && (
+          <TopScorerCongrats
+            playerName={playerName}
+            finalScore={finalScore}
+            dailyRank={playerDailyRank}
+            alltimeRank={playerAlltimeRank}
+            onContinue={() => setShowTopScorerCongrats(false)}
+          />
+        )}
+
         {screen === 'start' && (
           <div className="bg-white/95 backdrop-blur rounded-3xl p-8 shadow-2xl text-center">
             <div className="text-6xl mb-4">💎🏔️</div>
