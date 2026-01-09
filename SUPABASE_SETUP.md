@@ -36,6 +36,7 @@ CREATE INDEX idx_leaderboards_game_score
 ON leaderboards(game_id, score DESC);
 
 -- Create RPC function for top scores with rankings
+-- Automatically filters daily leaderboards to show only today's scores (UTC)
 CREATE OR REPLACE FUNCTION get_top_scores(
   game_name TEXT,
   limit_count INT
@@ -55,6 +56,11 @@ BEGIN
     l.created_at
   FROM leaderboards l
   WHERE l.game_id = game_name
+    -- Auto-filter daily leaderboard to show only today's scores (UTC)
+    AND (
+      game_name NOT LIKE '%daily%'
+      OR l.created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+    )
   ORDER BY l.score DESC, l.created_at ASC
   LIMIT limit_count;
 END;
@@ -161,19 +167,34 @@ The app uses two game IDs:
 3. Make sure RLS policies are set up correctly
 4. Check Supabase logs: **Project Settings → API → Logs**
 
-### Daily Leaderboard Not Resetting
+### Daily Leaderboard Auto-Reset
 
-The app doesn't automatically reset the daily leaderboard. You can:
+✅ **The daily leaderboard automatically resets at midnight UTC!**
 
-**Option A: Manual Reset (SQL)**
+The `get_top_scores` function automatically filters daily scores to show only those from the current UTC day. This works similar to the blockchain-based madness game:
+
+- Old scores remain in the database (for historical records)
+- Only today's scores appear on the daily leaderboard
+- No cron jobs or manual cleanup needed
+- Resets happen automatically at midnight UTC
+
+**How it works:**
+```sql
+-- The RPC function checks if game_id contains 'daily'
+-- If yes, only returns scores where created_at >= start of today (UTC)
+AND (
+  game_name NOT LIKE '%daily%'
+  OR l.created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+)
+```
+
+**Optional: Clean up old daily scores**
+If you want to keep your database small, you can manually delete old daily scores:
 ```sql
 DELETE FROM leaderboards
 WHERE game_id = 'memory-free-daily'
-AND created_at < CURRENT_DATE;
+AND created_at < CURRENT_DATE - INTERVAL '7 days';
 ```
-
-**Option B: Automated Reset (Supabase Edge Function)**
-Create a scheduled Edge Function to run at midnight UTC.
 
 ## Security Notes
 
